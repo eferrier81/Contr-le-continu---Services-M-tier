@@ -106,9 +106,46 @@ public class CommandeService {
      */
     @Transactional
     public Ligne ajouterLigne(int commandeNum, int produitRef, @Positive int quantite) {
-        // TODO : implémenter cette méthode
-        throw new UnsupportedOperationException("Pas encore implémenté");
+        // Vérifie que la quantité est positive
+        if (quantite <= 0) {
+            throw new jakarta.validation.ConstraintViolationException("La quantité doit être positive", null);
+        }
+
+        // Vérifie que la commande existe
+        var commande = commandeDao.findById(commandeNum)
+            .orElseThrow(() -> new java.util.NoSuchElementException("Commande introuvable : " + commandeNum));
+
+        // Vérifie que la commande n'est pas déjà envoyée
+        if (commande.getEnvoyeele() != null) {
+            throw new IllegalStateException("La commande a déjà été envoyée");
+        }
+
+        // Vérifie que le produit existe
+        var produit = produitDao.findById(produitRef)
+            .orElseThrow(() -> new java.util.NoSuchElementException("Produit introuvable : " + produitRef));
+
+        // Vérifie que le produit est disponible
+        if (produit.isIndisponible()) {
+            throw new IllegalStateException("Le produit est indisponible");
+        }
+
+        // Vérifie qu'il y a assez de stock pour la quantité demandée
+        if (produit.getUnitesEnStock() < quantite) {
+            throw new IllegalStateException("Stock insuffisant pour le produit : " + produitRef);
+        }
+
+        // Crée une nouvelle ligne de commande
+        var ligne = new Ligne(commande, produit, quantite);
+
+        // Met à jour les quantités commandées du produit
+        produit.setUnitesCommandees(produit.getUnitesCommandees() + quantite);
+
+        // Sauvegarde la ligne de commande
+        ligneDao.save(ligne);
+
+        return ligne;
     }
+
 
     /**
      * Service métier : Enregistre l'expédition d'une commande connue par sa clé
@@ -130,7 +167,38 @@ public class CommandeService {
      */
     @Transactional
     public Commande enregistreExpedition(int commandeNum) {
-        // TODO : implémenter cette méthode
-        throw new UnsupportedOperationException("Pas encore implémenté");
+        // Vérifie que la commande existe
+        var commande = commandeDao.findById(commandeNum)
+            .orElseThrow(() -> new java.util.NoSuchElementException("Commande introuvable : " + commandeNum));
+
+        // Vérifie que la commande n'a pas déjà été envoyée
+        if (commande.getEnvoyeele() != null) {
+            throw new IllegalStateException("La commande a déjà été envoyée");
+        }
+
+        // Renseigne la date d'expédition avec la date du jour
+        commande.setEnvoyeele(LocalDate.now());
+
+        // Pour chaque ligne de commande, mettre à jour les stocks et les quantités commandées
+        for (Ligne ligne : commande.getLignes()) {
+            var produit = ligne.getProduit();
+
+            // Décrémente la quantité en stock
+            int nouvelleQuantiteEnStock = produit.getUnitesEnStock() - ligne.getQuantite();
+            if (nouvelleQuantiteEnStock < 0) {
+                throw new IllegalStateException(
+                    "Stock insuffisant pour le produit : " + produit.getReference());
+            }
+            produit.setUnitesEnStock(nouvelleQuantiteEnStock);
+
+            // Décrémente la quantité commandée
+            produit.setUnitesCommandees(produit.getUnitesCommandees() - ligne.getQuantite());
+        }
+
+        // Sauvegarde la commande mise à jour
+        commandeDao.save(commande);
+
+        return commande;
     }
+
 }
